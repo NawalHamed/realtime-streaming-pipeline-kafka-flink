@@ -1,0 +1,24 @@
+FROM python:3.9.10-slim
+ 
+# Install necessary dependencies and download Oracle Instant Client
+RUN apt-get update && \
+    apt-get install -y libaio1
+ 
+ 
+WORKDIR /fetch_and_produce
+ 
+# Copy the requirements file into the container
+COPY ./requirements2.txt .
+
+RUN pip install --upgrade kafka-python
+ 
+ 
+RUN pip install --no-cache-dir -r requirements2.txt
+ 
+COPY ./fetch_and_produce .
+ 
+ 
+# Make port 80 available to the world outside this container
+EXPOSE 80
+ 
+CMD ["python", "fetch_and_produce.py"]

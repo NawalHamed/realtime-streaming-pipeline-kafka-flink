@@ -1,0 +1,129 @@
+services:
+  jobmanager:
+    build: .
+    image: pyflink
+    pull_policy: never
+    container_name: "jobmanager"
+    hostname: "jobmanager"
+    platform: "linux/amd64"
+    env_file:
+      - flink-env.env
+    expose:
+      - "6123"
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./:/opt/flink/usrlib
+      - ./src/:/opt/src
+    command: jobmanager
+    extra_hosts:
+      - "host.docker.internal:host-gateway" #// Access services on the host machine from within the Docker container
+    environment:
+      - POSTGRES_URL=${POSTGRES_URL:-jdbc:postgresql://host.docker.internal:5432/postgres}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-postgres}
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+
+    networks:
+      - shared_network
+
+  # Flink task manager
+  taskmanager:
+    image: pyflink
+    pull_policy: never
+    container_name: "taskmanager"
+    platform: "linux/amd64"
+    env_file:
+      - flink-env.env
+    expose:
+      - "6121"
+      - "6122"
+    volumes:
+      - ./:/opt/flink/usrlib
+      - ./src/:/opt/src
+    depends_on:
+      - jobmanager
+    command: taskmanager --taskmanager.registration.timeout 5 min
+    extra_hosts:
+      - "host.docker.internal:host-gateway" #// Access services on the host machine from within the Docker container
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 15
+        parallelism.default: 3
+
+    networks:
+      - shared_network
+
+  zookeeper:
+    container_name: zookeeper
+    image: quay.io/debezium/zookeeper:2.7
+    ports:
+     - 2181:2181
+     - 2888:2888
+     - 3888:3888
+    networks:
+      - shared_network
+    volumes:
+      - zk-conf:/zookeeper/conf:rw
+      - zk-data:/zookeeper/data"rw
+      - zk-txn:/zookeeper/txns:rw
+    tmpfs: "/datalog"  
+  kafka:  
+    container_name: kafka
+    image: quay.io/debezium/kafka:2.7
+    ports:
+     - 9092:9092
+    depends_on:
+     - zookeeper
+    environment:
+     - ZOOKEEPER_CONNECT=zookeeper:2181
+
+    networks:
+      - shared_network
+    volumes:
+      #- kafka-data:/kafka/data
+      #- kafka-config:/kafka/config
+      - kafka-config:/kafka/config:rw
+      #- kafka-libs:/kafka/libs
+      - kafka-logs:/kafka/logs:rw
+      # Mount the Docker volume for the folder (to persist subfolders)
+      - kafka-data:/kafka/data:rw
+      - ./kafka_scripts:/kafka/kafka_scripts
+      # Bind mount for the files (changes won't persist after restart)
+      #- /path/on/host/temp:/path/to/your/folder/files
+    entrypoint: ["sh", "-c", "sleep 20 && /docker-entrypoint.sh start"]
+
+  json_placeholder_generate:
+    build:
+      context: .
+      dockerfile: Dockerfile.fetch
+    image: json_placeholder_script:v1
+    container_name: json_placeholder_generate
+    ports:
+      - "8000:80"
+    volumes:
+      - ./fetch_and_produce:/fetch_and_produce
+    environment:
+      - PYTHONUNBUFFERED=1
+
+    networks:
+      - shared_network
+
+
+volumes:
+  zk-data:
+  zk-conf:
+  zk-txn:
+  kafka-data:
+  kafka-config:
+  kafka-libs:
+  kafka-logs:
+
+networks:
+  shared_network:
+    external: true
